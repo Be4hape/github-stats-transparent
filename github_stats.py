@@ -1,3 +1,5 @@
+
+
 #!/usr/bin/python3
 
 import asyncio
@@ -72,6 +74,7 @@ class Queries(object):
                                                headers=headers,
                                                params=tuple(params.items()))
                 if r.status == 202:
+                    # print(f"{path} returned 202. Retrying...")
                     print(f"A path returned 202. Retrying...")
                     await asyncio.sleep(2)
                     continue
@@ -92,6 +95,7 @@ class Queries(object):
                         continue
                     elif r.status_code == 200:
                         return r.json()
+        # print(f"There were too many 202s. Data for {path} will be incomplete.")
         print("There were too many 202s. Data for this repository will be incomplete.")
         return dict()
 
@@ -99,8 +103,7 @@ class Queries(object):
     def repos_overview(contrib_cursor: Optional[str] = None,
                        owned_cursor: Optional[str] = None) -> str:
         """
-        :return: GraphQL query with overview of user repositories.
-        Note: Added 'isPrivate' field to each repository node.
+        :return: GraphQL query with overview of user repositories
         """
         return f"""{{
   viewer {{
@@ -120,17 +123,16 @@ class Queries(object):
         endCursor
       }}
       nodes {{
-        nameWithOwner,
-        isPrivate,
+        nameWithOwner
         stargazers {{
           totalCount
-        }},
-        forkCount,
+        }}
+        forkCount
         languages(first: 10, orderBy: {{field: SIZE, direction: DESC}}) {{
           edges {{
-            size,
+            size
             node {{
-              name,
+              name
               color
             }}
           }}
@@ -157,17 +159,16 @@ class Queries(object):
         endCursor
       }}
       nodes {{
-        nameWithOwner,
-        isPrivate,
+        nameWithOwner
         stargazers {{
           totalCount
-        }},
-        forkCount,
+        }}
+        forkCount
         languages(first: 10, orderBy: {{field: SIZE, direction: DESC}}) {{
           edges {{
-            size,
+            size
             node {{
-              name,
+              name
               color
             }}
           }}
@@ -177,7 +178,6 @@ class Queries(object):
   }}
 }}
 """
-
 
     @staticmethod
     def contrib_years() -> str:
@@ -235,13 +235,11 @@ class Stats(object):
                  session: aiohttp.ClientSession,
                  exclude_repos: Optional[Set] = None,
                  exclude_langs: Optional[Set] = None,
-                 consider_forked_repos: bool = False,
-                 include_private: bool = True):
+                 consider_forked_repos: bool = False):
         self.username = username
         self._exclude_repos = set() if exclude_repos is None else exclude_repos
         self._exclude_langs = set() if exclude_langs is None else exclude_langs
         self._consider_forked_repos = consider_forked_repos
-        self._include_private = include_private
         self.queries = Queries(username, access_token, session)
 
         self._name = None
@@ -324,9 +322,6 @@ Languages:
 
             for repo in repos:
                 name = repo.get("nameWithOwner")
-                # 만약 include_private가 False이면 private 저장소는 건너뜁니다.
-                if not self._include_private and repo.get("isPrivate", False):
-                    continue
                 if name in self._repos or name in self._exclude_repos:
                     continue
                 self._repos.add(name)
@@ -334,15 +329,14 @@ Languages:
                 self._forks += repo.get("forkCount", 0)
 
                 for lang in repo.get("languages", {}).get("edges", []):
-                    lang_name = lang.get("node", {}).get("name", "Other")
+                    name = lang.get("node", {}).get("name", "Other")
                     languages = await self.languages
-                    if lang_name in self._exclude_langs:
-                        continue
-                    if lang_name in languages:
-                        languages[lang_name]["size"] += lang.get("size", 0)
-                        languages[lang_name]["occurrences"] += 1
+                    if name in self._exclude_langs: continue
+                    if name in languages:
+                        languages[name]["size"] += lang.get("size", 0)
+                        languages[name]["occurrences"] += 1
                     else:
-                        languages[lang_name] = {
+                        languages[name] = {
                             "size": lang.get("size", 0),
                             "occurrences": 1,
                             "color": lang.get("node", {}).get("color")
@@ -359,10 +353,11 @@ Languages:
             else:
                 break
 
-        # Calculate proportional language usage
+        # TODO: Improve languages to scale by number of contributions to
+        #       specific filetypes
         langs_total = sum([v.get("size", 0) for v in self._languages.values()])
         for k, v in self._languages.items():
-            v["prop"] = 100 * (v.get("size", 0) / langs_total) if langs_total > 0 else 0
+            v["prop"] = 100 * (v.get("size", 0) / langs_total)
 
     @property
     async def name(self) -> str:
@@ -523,8 +518,7 @@ async def main() -> None:
     access_token = os.getenv("ACCESS_TOKEN")
     user = os.getenv("GITHUB_ACTOR")
     async with aiohttp.ClientSession() as session:
-        # include_private를 True로 설정하면 private 저장소 데이터도 포함됩니다.
-        s = Stats(user, access_token, session, include_private=True)
+        s = Stats(user, access_token, session)
         print(await s.to_str())
 
 
